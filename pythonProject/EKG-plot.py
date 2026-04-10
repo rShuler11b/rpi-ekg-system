@@ -32,7 +32,7 @@ adc_device = ADS.ADS1115(i2c_bus)
 adc_device.gain = 1
 adc_device.data_rate = 860
 
-adc_channel_A0 = AnalogIn(adc_device, ADS.P0)
+adc_channel_A0 = AnalogIn(adc_device, 0) # Changed from ADS.P0 to 0 for single-ended input on channel A0
 
 
 # -----------------------------
