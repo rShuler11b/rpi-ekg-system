@@ -1,12 +1,12 @@
 # ============================================================
 # Name: Ryan Shuler
 # Project: Embedded ECG Monitoring System
-# File: EKG-plot.py
+# File: EKG_plot.py
 #
 # Description:
 #   This program reads ECG voltage data from the ADS1115 ADC,
-#   applies real-time digital filtering, and displays both
-#   raw and filtered ECG signals live using matplotlib.
+#   applies real-time digital filtering, and displays only the
+#   filtered ECG signal using matplotlib.
 #
 # Hardware:
 #   - Raspberry Pi Zero 2 W
@@ -19,11 +19,15 @@
 #   3. 60 Hz notch filter (powerline interference)
 #
 # Output:
-#   - Live graph with RAW and FILTERED ECG
-#   - Terminal output of labeled raw data
+#   - Live graph with FILTERED ECG only
+#   - Terminal output of labeled raw and filtered data
+#
+# Notes:
+#   - Lead-off pins use pull-down resistors
+#   - Plot uses a fixed y-axis for a cleaner waveform display
+#   - Animation settings are tuned to reduce redraw overhead
 # ============================================================
 
-import time
 import math
 from collections import deque
 
@@ -42,7 +46,7 @@ import matplotlib.animation as animation
 # USER SETTINGS
 # ------------------------------------------------------------
 buffer_size_number_of_samples = 500
-sample_time_interval_seconds = 0.005   # 200 Hz sampling rate
+sample_time_interval_seconds = 0.005   # 200 samples per second
 
 # Filter tuning parameters
 high_pass_alpha = 0.995
@@ -50,6 +54,13 @@ low_pass_beta = 0.12
 
 notch_filter_frequency_hz = 60.0
 notch_filter_radius = 0.95
+
+# Static plot limits
+plot_y_axis_minimum = -1.5
+plot_y_axis_maximum = 1.5
+
+# Print every N frames to avoid slowing the plot too much
+terminal_print_every_n_frames = 10
 
 
 # ------------------------------------------------------------
@@ -66,19 +77,22 @@ adc_channel_A0 = AnalogIn(adc_device, 0)
 
 # ------------------------------------------------------------
 # SETUP LEAD-OFF DETECTION PINS
+# Using pull-down so the default state is held LOW unless the
+# lead-off output drives the pin HIGH.
 # ------------------------------------------------------------
 lead_off_positive_pin = DigitalInOut(board.D17)
 lead_off_positive_pin.direction = Direction.INPUT
-lead_off_positive_pin.pull = Pull.UP
+lead_off_positive_pin.pull = Pull.DOWN
 
 lead_off_negative_pin = DigitalInOut(board.D27)
 lead_off_negative_pin.direction = Direction.INPUT
-lead_off_negative_pin.pull = Pull.UP
+lead_off_negative_pin.pull = Pull.DOWN
 
 
 # ------------------------------------------------------------
 # DATA BUFFERS
-# deque automatically drops old data when full
+# The raw buffer is kept for debugging or later use.
+# The plot only displays the filtered buffer.
 # ------------------------------------------------------------
 raw_voltage_buffer = deque([0.0] * buffer_size_number_of_samples,
                            maxlen=buffer_size_number_of_samples)
@@ -91,17 +105,18 @@ sample_number_buffer = deque(range(buffer_size_number_of_samples),
 
 
 # ------------------------------------------------------------
-# FILTER STATE VARIABLES (required for recursive filters)
+# FILTER STATE VARIABLES
+# These store previous values required by the recursive filters.
 # ------------------------------------------------------------
 
-# High-pass
+# High-pass filter memory
 previous_raw_sample = 0.0
 previous_high_pass_output = 0.0
 
-# Low-pass
+# Low-pass filter memory
 previous_low_pass_output = 0.0
 
-# Notch
+# Notch filter memory
 previous_notch_input_1 = 0.0
 previous_notch_input_2 = 0.0
 previous_notch_output_1 = 0.0
@@ -110,6 +125,8 @@ previous_notch_output_2 = 0.0
 
 # ------------------------------------------------------------
 # NOTCH FILTER CONSTANTS
+# fs = sampling frequency
+# w0 = digital notch frequency in radians/sample
 # ------------------------------------------------------------
 sampling_frequency_hz = 1.0 / sample_time_interval_seconds
 notch_angular_frequency = 2.0 * math.pi * notch_filter_frequency_hz / sampling_frequency_hz
@@ -119,16 +136,15 @@ notch_cosine_term = math.cos(notch_angular_frequency)
 # ------------------------------------------------------------
 # FILTER FUNCTIONS
 # ------------------------------------------------------------
-
 def apply_high_pass_filter(current_raw_sample):
     """
-    Removes slow baseline drift.
+    Removes slow baseline drift from the ECG signal.
 
     Formula:
-        y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+        y[n] = alpha * ( y[n-1] + x[n] - x[n-1] )
 
-    x[n]   = current raw input sample
-    x[n-1] = previous raw input sample
+    x[n]   = current raw sample
+    x[n-1] = previous raw sample
     y[n-1] = previous high-pass output
     y[n]   = current high-pass output
     """
@@ -141,7 +157,6 @@ def apply_high_pass_filter(current_raw_sample):
         - previous_raw_sample
     )
 
-    # Update stored values for next iteration
     previous_raw_sample = current_raw_sample
     previous_high_pass_output = current_high_pass_output
 
@@ -154,10 +169,6 @@ def apply_low_pass_filter(current_input_sample):
 
     Formula:
         y[n] = beta * x[n] + (1 - beta) * y[n-1]
-
-    x[n]   = current input sample
-    y[n-1] = previous low-pass output
-    y[n]   = current low-pass output
     """
     global previous_low_pass_output
 
@@ -173,7 +184,7 @@ def apply_low_pass_filter(current_input_sample):
 
 def apply_notch_filter(current_input_sample):
     """
-    Removes 60 Hz powerline noise. (USA specific))
+    Removes narrowband 60 Hz powerline interference.
 
     Formula:
         y[n] = x[n]
@@ -181,12 +192,6 @@ def apply_notch_filter(current_input_sample):
                + x[n-2]
                + 2*r*cos(w0)*y[n-1]
                - r^2*y[n-2]
-
-    where:
-        w0 = 2*pi*f/fs
-        f  = notch frequency (60 Hz)
-        fs = sample frequency
-        r  = notch radius, close to 1 for a narrow notch
     """
     global previous_notch_input_1
     global previous_notch_input_2
@@ -201,7 +206,6 @@ def apply_notch_filter(current_input_sample):
         - (notch_filter_radius ** 2) * previous_notch_output_2
     )
 
-    # Shift stored values (acts like memory)
     previous_notch_input_2 = previous_notch_input_1
     previous_notch_input_1 = current_input_sample
 
@@ -213,86 +217,81 @@ def apply_notch_filter(current_input_sample):
 
 def apply_full_filter_chain(current_raw_sample):
     """
-    Apply filters in sequence:
-    raw -> high-pass -> low-pass -> notch
+    Filter order:
+        raw -> high-pass -> low-pass -> notch
     """
-    hp = apply_high_pass_filter(current_raw_sample)
-    lp = apply_low_pass_filter(hp)
-    notch = apply_notch_filter(lp)
+    high_pass_output = apply_high_pass_filter(current_raw_sample)
+    low_pass_output = apply_low_pass_filter(high_pass_output)
+    notch_output = apply_notch_filter(low_pass_output)
 
-    return notch
+    return notch_output
 
 
 # ------------------------------------------------------------
 # PLOT SETUP
+# Only the filtered ECG is plotted.
+# A fixed y-axis is used so the waveform does not visually jump
+# around from constant rescaling.
 # ------------------------------------------------------------
 figure_object, axis_object = plt.subplots()
 
-raw_line_plot, = axis_object.plot(sample_number_buffer,
-                                  raw_voltage_buffer,
-                                  label="RAW ECG")
+filtered_line_plot, = axis_object.plot(
+    sample_number_buffer,
+    list(filtered_voltage_buffer),
+    label="FILTERED ECG"
+)
 
-filtered_line_plot, = axis_object.plot(sample_number_buffer,
-                                       filtered_voltage_buffer,
-                                       label="FILTERED ECG")
-
-axis_object.set_title("Live ECG Display")
+axis_object.set_title("Filtered Live ECG Display")
 axis_object.set_xlabel("Sample Number")
 axis_object.set_ylabel("Voltage (V)")
+axis_object.set_ylim(plot_y_axis_minimum, plot_y_axis_maximum)
 axis_object.legend()
 axis_object.grid(True)
 
 
 # ------------------------------------------------------------
-# ANIMATION LOOP (runs continuously)
+# ANIMATION LOOP
+# Reads a sample, checks lead status, filters the signal,
+# prints labeled data to the terminal, and updates the plot.
 # ------------------------------------------------------------
 def update_plot(frame_number):
-
     lead_off_detected = (
         lead_off_positive_pin.value is True
         or lead_off_negative_pin.value is True
     )
 
     if lead_off_detected:
-        print("LEAD OFF DETECTED")
-
         new_raw_voltage = 0.0
         new_filtered_voltage = 0.0
+
+        if frame_number % terminal_print_every_n_frames == 0:
+            print("LEAD OFF DETECTED | RAW: 0.00000 V | FILTERED: 0.00000 V")
     else:
         new_raw_voltage = adc_channel_A0.voltage
         new_filtered_voltage = apply_full_filter_chain(new_raw_voltage)
 
-        # ----------------------------------------------------
-        # TERMINAL OUTPUT (LABELED)
-        # ----------------------------------------------------
-        print(f"RAW: {new_raw_voltage:.5f} V | FILTERED: {new_filtered_voltage:.5f} V")
+        if frame_number % terminal_print_every_n_frames == 0:
+            print(f"RAW: {new_raw_voltage:.5f} V | FILTERED: {new_filtered_voltage:.5f} V")
 
-    # Update buffers
     raw_voltage_buffer.append(new_raw_voltage)
     filtered_voltage_buffer.append(new_filtered_voltage)
 
-    # Update graph lines
-    raw_line_plot.set_ydata(raw_voltage_buffer)
-    filtered_line_plot.set_ydata(filtered_voltage_buffer)
+    filtered_line_plot.set_ydata(list(filtered_voltage_buffer))
 
-    # Auto-scale Y axis
-    combined_minimum = min(min(raw_voltage_buffer), min(filtered_voltage_buffer))
-    combined_maximum = max(max(raw_voltage_buffer), max(filtered_voltage_buffer))
-
-    axis_object.set_ylim(combined_minimum - 0.1,
-                         combined_maximum + 0.1)
-
-    return raw_line_plot, filtered_line_plot
+    return (filtered_line_plot,)
 
 
 # ------------------------------------------------------------
 # START LIVE DISPLAY
+# interval is in milliseconds
+# blit=True redraws only the changing artist for better speed
 # ------------------------------------------------------------
 plot_animation = animation.FuncAnimation(
     figure_object,
     update_plot,
-    interval=sample_time_interval_seconds * 1000,
-    blit=False
+    interval=1,
+    blit=True,
+    cache_frame_data=False
 )
 
 plt.show()
