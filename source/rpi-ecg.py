@@ -1,12 +1,13 @@
 # ============================================================
 # Name: Ryan Shuler
 # Project: Embedded ECG Monitoring System
-# File: EKG_plot.py
+# File: rpi-ecg.py
 #
 # Description:
 #   This program reads ECG voltage data from the ADS1115 ADC,
-#   applies real-time digital filtering, and displays only the
-#   filtered ECG signal using matplotlib.
+#   applies real-time digital filtering, displays only the
+#   filtered ECG signal using matplotlib, and records ECG data
+#   to a CSV file during runtime.
 #
 # Hardware:
 #   - Raspberry Pi Zero 2 W
@@ -21,6 +22,8 @@
 # Output:
 #   - Live graph with FILTERED ECG only
 #   - Terminal output of labeled raw and filtered data
+#   - CSV recording of sample number, timestamp, raw voltage,
+#     filtered voltage, and lead-off flag
 #
 # Notes:
 #   - Lead-off pins use pull-down resistors
@@ -29,6 +32,7 @@
 # ============================================================
 
 import math
+import time
 from collections import deque
 
 import board
@@ -41,6 +45,12 @@ from adafruit_ads1x15.analog_in import AnalogIn
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
+from recording_utils import (
+    open_recording_file,
+    append_sample_to_csv,
+    close_recording_file
+)
+
 
 # ------------------------------------------------------------
 # USER SETTINGS
@@ -49,15 +59,15 @@ buffer_size_number_of_samples = 500
 sample_time_interval_seconds = 0.005   # 200 samples per second
 
 # Filter tuning parameters
-high_pass_alpha = 0.995
-low_pass_beta = 0.12
+high_pass_alpha = 0.99 # higher alpha = stronger high-pass effect, more baseline drift removed
+low_pass_beta = 0.08 # higher beta = stronger low-pass effect, more noise removed but more signal smoothing
 
 notch_filter_frequency_hz = 60.0
-notch_filter_radius = 0.95
+notch_filter_radius = 0.95 # only adjust if 60 Hz interference is not being adequately removed.
 
 # Static plot limits
-plot_y_axis_minimum = -1.5
-plot_y_axis_maximum = 1.5
+plot_y_axis_minimum = -0.25
+plot_y_axis_maximum = 0.25
 
 # Print every N frames to avoid slowing the plot too much
 terminal_print_every_n_frames = 10
@@ -91,32 +101,33 @@ lead_off_negative_pin.pull = Pull.DOWN
 
 # ------------------------------------------------------------
 # DATA BUFFERS
-# The raw buffer is kept for debugging or later use.
-# The plot only displays the filtered buffer.
+# Raw data is still stored in memory for debugging.
+# Only the filtered signal is shown on the live plot.
 # ------------------------------------------------------------
-raw_voltage_buffer = deque([0.0] * buffer_size_number_of_samples,
-                           maxlen=buffer_size_number_of_samples)
+raw_voltage_buffer = deque(
+    [0.0] * buffer_size_number_of_samples,
+    maxlen=buffer_size_number_of_samples
+)
 
-filtered_voltage_buffer = deque([0.0] * buffer_size_number_of_samples,
-                                maxlen=buffer_size_number_of_samples)
+filtered_voltage_buffer = deque(
+    [0.0] * buffer_size_number_of_samples,
+    maxlen=buffer_size_number_of_samples
+)
 
-sample_number_buffer = deque(range(buffer_size_number_of_samples),
-                             maxlen=buffer_size_number_of_samples)
+sample_number_buffer = deque(
+    range(buffer_size_number_of_samples),
+    maxlen=buffer_size_number_of_samples
+)
 
 
 # ------------------------------------------------------------
 # FILTER STATE VARIABLES
-# These store previous values required by the recursive filters.
+# These store prior values needed by the recursive filters.
 # ------------------------------------------------------------
-
-# High-pass filter memory
 previous_raw_sample = 0.0
 previous_high_pass_output = 0.0
-
-# Low-pass filter memory
 previous_low_pass_output = 0.0
 
-# Notch filter memory
 previous_notch_input_1 = 0.0
 previous_notch_input_2 = 0.0
 previous_notch_output_1 = 0.0
@@ -129,12 +140,26 @@ previous_notch_output_2 = 0.0
 # w0 = digital notch frequency in radians/sample
 # ------------------------------------------------------------
 sampling_frequency_hz = 1.0 / sample_time_interval_seconds
-notch_angular_frequency = 2.0 * math.pi * notch_filter_frequency_hz / sampling_frequency_hz
+notch_angular_frequency = (
+    2.0 * math.pi * notch_filter_frequency_hz / sampling_frequency_hz
+)
 notch_cosine_term = math.cos(notch_angular_frequency)
 
 
 # ------------------------------------------------------------
-# FILTER FUNCTIONS
+# RECORDING SETUP
+# This section handles CSV recording activity only.
+# ------------------------------------------------------------
+csv_file_object, csv_writer_object, csv_file_path = open_recording_file()
+print(f"Recording to: {csv_file_path}")
+
+recording_start_time_seconds = time.time()
+current_sample_index = 0
+
+
+# ------------------------------------------------------------
+# SIGNAL PROCESSING FUNCTIONS
+# This section handles filtering only.
 # ------------------------------------------------------------
 def apply_high_pass_filter(current_raw_sample):
     """
@@ -230,8 +255,6 @@ def apply_full_filter_chain(current_raw_sample):
 # ------------------------------------------------------------
 # PLOT SETUP
 # Only the filtered ECG is plotted.
-# A fixed y-axis is used so the waveform does not visually jump
-# around from constant rescaling.
 # ------------------------------------------------------------
 figure_object, axis_object = plt.subplots()
 
@@ -250,29 +273,63 @@ axis_object.grid(True)
 
 
 # ------------------------------------------------------------
-# ANIMATION LOOP
-# Reads a sample, checks lead status, filters the signal,
-# prints labeled data to the terminal, and updates the plot.
+# MAIN UPDATE LOOP
+# This loop has two separate jobs:
+#   1. signal processing activity
+#   2. recording activity
 # ------------------------------------------------------------
 def update_plot(frame_number):
+    global current_sample_index # global is needed to modify the variable defined outside the function
+
+    # --------------------------------------------------------
+    # SIGNAL PROCESSING ACTIVITY
+    # Check lead status, read ADC, and generate filtered ECG.
+    # --------------------------------------------------------
     lead_off_detected = (
         lead_off_positive_pin.value is True
         or lead_off_negative_pin.value is True
     )
 
+    timestamp_seconds = time.time() - recording_start_time_seconds
+
     if lead_off_detected:
         new_raw_voltage = 0.0
         new_filtered_voltage = 0.0
+        lead_off_flag = 1
 
         if frame_number % terminal_print_every_n_frames == 0:
             print("LEAD OFF DETECTED | RAW: 0.00000 V | FILTERED: 0.00000 V")
+
     else:
         new_raw_voltage = adc_channel_A0.voltage
         new_filtered_voltage = apply_full_filter_chain(new_raw_voltage)
+        lead_off_flag = 0
 
         if frame_number % terminal_print_every_n_frames == 0:
-            print(f"RAW: {new_raw_voltage:.5f} V | FILTERED: {new_filtered_voltage:.5f} V")
+            print(
+                f"RAW: {new_raw_voltage:.5f} V | "
+                f"FILTERED: {new_filtered_voltage:.5f} V"
+            )
 
+    # --------------------------------------------------------
+    # RECORDING ACTIVITY
+    # Save one CSV row for each sample collected.
+    # --------------------------------------------------------
+    append_sample_to_csv(
+        csv_writer_object=csv_writer_object,
+        sample_index=current_sample_index,
+        timestamp_seconds=timestamp_seconds,
+        raw_voltage=new_raw_voltage,
+        filtered_voltage=new_filtered_voltage,
+        lead_off_flag=lead_off_flag
+    )
+
+    current_sample_index += 1
+
+    # --------------------------------------------------------
+    # DISPLAY BUFFER ACTIVITY
+    # Store the newest values for live plotting.
+    # --------------------------------------------------------
     raw_voltage_buffer.append(new_raw_voltage)
     filtered_voltage_buffer.append(new_filtered_voltage)
 
@@ -294,4 +351,8 @@ plot_animation = animation.FuncAnimation(
     cache_frame_data=False
 )
 
-plt.show()
+try:
+    plt.show()
+finally:
+    close_recording_file(csv_file_object)
+    print("Recording file closed.")
