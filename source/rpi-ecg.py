@@ -59,11 +59,11 @@ buffer_size_number_of_samples = 500
 sample_time_interval_seconds = 0.005   # 200 samples per second
 
 # Filter tuning parameters
-high_pass_alpha = 0.99 # higher alpha = stronger high-pass effect, more baseline drift removed
-low_pass_beta = 0.08 # higher beta = stronger low-pass effect, more noise removed but more signal smoothing
+high_pass_alpha = 0.98 # higher alpha = stronger high-pass effect, more baseline drift removed
+low_pass_beta = 0.2 # higher beta = stronger low-pass effect, more noise removed but more signal smoothing
 
 notch_filter_frequency_hz = 60.0
-notch_filter_radius = 0.95 # only adjust if 60 Hz interference is not being adequately removed.
+notch_filter_radius = 0.98 # only adjust if 60 Hz interference is not being adequately removed.
 
 # Static plot limits
 plot_y_axis_minimum = -0.25
