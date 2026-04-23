@@ -1,201 +1,261 @@
-# Raspberry Pi Embedded EKG System
+title: Raspberry Pi Embedded EKG System
 
-## Overview
-This project is an embedded electrocardiogram (EKG) system built on a Raspberry Pi platform. It focuses on real-time signal acquisition, filtering, visualization, and data recording using low-cost hardware.
+overview: >
+  This project is an embedded electrocardiogram (EKG) system built on Raspberry Pi platforms.
+  It performs real-time signal acquisition, filtering, visualization, and data recording
+  using low-cost hardware.
 
-The system is being developed in phases, progressing from basic signal acquisition to advanced signal processing and eventual hardware acceleration.
+platforms:
+  - name: Raspberry Pi Zero 2 W
+    adc: ADS1115
+    interface: I2C
+  - name: Raspberry Pi 5
+    adc: MCP3202
+    interface: SPI
 
-Core areas of focus:
-- Biomedical signal acquisition
-- Real-time digital signal processing
-- Embedded system design
-- Noise reduction and signal integrity
-- Data logging and analysis
+focus_areas:
+  - Biomedical signal acquisition
+  - Real-time digital signal processing
+  - Embedded system design
+  - Noise reduction and signal integrity
+  - Data logging and analysis
 
----
+disclaimer:
+  text: >
+    This project is for research and educational purposes only.
+    It is NOT a medical device and is not intended for diagnosis,
+    treatment, or clinical decision-making.
+    Use at your own risk.
 
-## !! Disclaimer !!
-This project is for research and educational purposes only.
+hardware:
+  configurations:
+    pi_zero_2w:
+      components:
+        - Raspberry Pi Zero 2 W
+        - AD8232 ECG front-end
+        - ADS1115 16-bit ADC (I2C)
+        - 3-lead electrodes
+        - Breadboard and jumpers
+    pi_5:
+      components:
+        - Raspberry Pi 5
+        - AD8232 ECG front-end
+        - MCP3202 12-bit ADC (SPI)
+        - 3-lead electrodes
+        - Breadboard and jumpers
 
-It is NOT a medical device and is not intended for:
-- Diagnosis
-- Treatment
-- Clinical decision-making
+  optional:
+    - IMU (motion artifact detection)
+    - ST7789 TFT display
+    - Perf board / PCB
 
-Use at your own risk.
+software:
+  language: Python 3
+  common_libraries:
+    - numpy
+    - matplotlib
+    - collections (deque)
+    - time
+    - os
+    - csv
 
----
+  ads1115_libraries:
+    - adafruit-circuitpython-ads1x15
+    - adafruit-blinka
+    - smbus2
+    - busio
+    - board
+    - digitalio
 
-## Hardware Components
+  mcp3202_libraries:
+    - spidev
+    - RPi.GPIO
 
-- Raspberry Pi Zero 2 W
-- AD8232 EKG front-end module
-- ADS1115 16-bit ADC (I2C)
-- 3-lead electrode configuration
-- Breadboard and jumper wires
-
-Optional / In Progress:
-- IMU (motion artifact detection)
-- ST7789 TFT display
-- Perf board / PCB prototype
-
----
-
-## Software Components
-
-- Python 3
-
-Libraries used:
-- adafruit-circuitpython-ads1x15
-- adafruit-blinka
-- smbus2
-- busio
-- board
-- digitalio
-- numpy
-- matplotlib
-- collections (deque)
-- time (standard library)
-- os (file handling)
-- csv (data recording)
-
----
-
-## Features (Current)
-
-- Real-time EKG signal acquisition via ADS1115
-- Digital filtering pipeline:
+features:
+  - Real-time ECG acquisition
+  - Dual ADC support (ADS1115, MCP3202)
   - High-pass filter (baseline drift removal)
   - Low-pass filter (noise smoothing)
-  - 60 Hz notch filter (powerline interference)
-- Live waveform visualization (filtered signal)
-- Lead-off detection using GPIO
-- Terminal output for debugging (raw + filtered)
-- Adjustable filter parameters
-- CSV data recording per session
-- Logging system for debugging and troubleshooting
+  - 60 Hz notch filter
+  - Live waveform visualization
+  - Lead-off detection via GPIO
+  - Terminal debug output
+  - CSV recording
+  - Logging system
 
----
+project_structure:
+  root: rpi-ecg
+  files:
+    - README.md
+    - LICENSE
+    - .gitignore
+  source:
+    - ekg_plot.py (ADS1115)
+    - ekg_main.py
+    - ecg_rpi5.py (MCP3202)
+    - recording_utils.py
+  directories:
+    - recordings
+    - logs
+    - images
+    - documents
 
-## Project Structure
+adc_architecture:
+  ads1115:
+    resolution: 16-bit
+    interface: I2C
+    characteristics:
+      - Lower noise
+      - Slower sampling
+      - Simpler wiring
+  mcp3202:
+    resolution: 12-bit
+    interface: SPI
+    characteristics:
+      - Faster sampling
+      - Deterministic timing
+      - Lower latency
 
-rpi-ecg/
-│
-├── README.md
-├── LICENSE
-├── .gitignore
-│
-├── source/
-│   ├── ekg_plot.py
-│   ├── ekg_main.py
-│   ├── recording_utils.py
-│
-├── recordings/          # Saved ECG data (.csv)
-├── logs/                # Runtime logs / debug output
-├── images/
-└── documents/
-    └── troubleshooting.doc
+run:
+  setup:
+    - git clone https://github.com/rShuler11b/rpi-ekg-system.git
+    - cd rpi-ecg
+    - python3 -m venv venv
+    - source venv/bin/activate
+    - pip install -r requirements.txt
 
----
+  pi_zero_2w:
+    command:
+      - cd source
+      - python ekg_plot.py
 
-## How to Run
+  pi_5:
+    enable_spi:
+      - sudo raspi-config
+      - Interface Options → SPI → Enable
+    command:
+      - cd source
+      - python ecg_rpi5.py
 
-1. Clone repository:
-git clone https://github.com/rShuler11b/rpi-ekg-system.git
-cd rpi-ecg
+data_recording:
+  location: recordings/
+  fields:
+    - sample_index
+    - timestamp_seconds
+    - raw_voltage
+    - filtered_voltage
+    - lead_off_flag
+  purpose:
+    - Offline analysis
+    - Filter tuning
+    - Benchmark comparison
 
-2. Create virtual environment:
-python3 -m venv venv
-source venv/bin/activate
+logging:
+  location: logs/
+  includes:
+    - Lead-off events
+    - Signal anomalies
+    - Runtime behavior
+  purpose:
+    - Troubleshooting
+    - Performance tuning
 
-3. Install dependencies:
-pip install -r requirements.txt
+hardware_setup:
+  ad8232:
+    connections:
+      - 3.3V → 3.3V
+      - GND → GND
+      - OUTPUT → ADC input
+      - LO+ → GPIO
+      - LO− → GPIO
+    electrodes:
+      - RA
+      - LA
+      - RL
 
-4. Run the system:
-cd source
-python ekg_plot.py
+  ads1115:
+    connections:
+      - VDD → 3.3V
+      - GND → GND
+      - SDA → GPIO2
+      - SCL → GPIO3
+      - ADDR → GND
+      - A0 → AD8232 OUTPUT
+    enable:
+      - sudo raspi-config
+      - Interface Options → I2C → Enable
 
----
+  mcp3202:
+    connections:
+      - VDD → 3.3V
+      - GND → GND
+      - CLK → GPIO11
+      - DOUT → GPIO9
+      - DIN → GPIO10
+      - CS → GPIO8
+      - CH0 → AD8232 OUTPUT
+    enable:
+      - sudo raspi-config
+      - Interface Options → SPI → Enable
 
-## Data Recording
+signal_chain:
+  flow: AD8232 → optional RC filter → ADC → digital filters → visualization + recording
+  filters:
+    - High-pass
+    - Low-pass
+    - Notch (60 Hz)
 
-Recorded sessions are saved as CSV files in the `recordings/` directory.
+configuration_notes:
+  sampling:
+    ads1115: "~860 SPS max (I2C limited)"
+    mcp3202: "Higher, more consistent via SPI"
 
-Each file contains:
-- sample_index
-- timestamp_seconds
-- raw_voltage
-- filtered_voltage
-- lead_off_flag
+  scaling:
+    note: "Adjust y-axis in plotting code (ECG is low amplitude)"
 
-Example:
-sample_index,timestamp_seconds,raw_voltage,filtered_voltage,lead_off  
-0,0.000,1.5123,0.0021,0  
+  tuning_parameters:
+    - high_pass_alpha
+    - low_pass_beta
+    - notch_frequency
+    - notch_radius
 
-Purpose:
-- Offline analysis
-- Filter tuning and validation
-- Comparison against benchmark datasets (PhysioNet)
+troubleshooting:
+  flatline:
+    - Check SDN pin (must be HIGH)
+    - Verify electrode contact
+    - Confirm wiring
 
----
+  noise:
+    - Improve grounding
+    - Shorten wires
+    - Add RC filter
+    - Adjust low-pass filter
 
-## Logging
+  unstable_plot:
+    - Reduce plot update rate
+    - Ensure sampling is decoupled
+    - Verify timing
 
-The `logs/` directory stores runtime and debug information.
+  lead_off:
+    - Check LO+ and LO− wiring
+    - Verify GPIO configuration
 
-This includes:
-- Lead-off events
-- Signal anomalies
-- System behavior during runtime
+performance:
+  notes:
+    - SPI more deterministic than I2C
+    - Decoupled sampling improves stability
+    - CSV logging can introduce timing jitter
 
-Used for:
-- Troubleshooting
-- Performance tuning
-- Debugging hardware/software interaction
+usage:
+  recommendations:
+    - Use ADS1115 for initial setup
+    - Use MCP3202 for timing-sensitive work
+    - Validate signal before tuning filters
 
----
+author:
+  name: Ryan Shuler
+  role: Embedded Systems Engineering Student
+  institution: Oregon Institute of Technology
 
-## Development Phases
-
-### Phase 1: Signal Acquisition and Filtering (Current)
-- Hardware integration (AD8232 + ADS1115)
-- Real-time filtering pipeline
-- Stable waveform visualization
-- Data recording and logging
-
-### Phase 2: Signal Interpretation (Next)
-- PQRST detection
-- Heart rate calculation
-- Feature extraction
-- Motion artifact reduction using IMU
-
-### Phase 3: Hardware Acceleration (Planned)
-- Port filtering pipeline to FPGA
-- Real-time deterministic processing
-- Optimized embedded architecture
-
----
-
-## Future Work
-
-- Adaptive filtering (LMS, Kalman)
-- IMU-based motion compensation
-- Improved analog front-end design
-- Shielding and grounding improvements
-- Perf board / PCB design
-- Validation using PhysioNet datasets (MIT-BIH, NSTDB)
-- Real-time metrics (HR, HRV)
-
----
-
-## Author
-
-Ryan Shuler  
-Embedded Systems Engineering Student  
-Oregon Institute of Technology  
-
----
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
+license:
+  type: MIT
