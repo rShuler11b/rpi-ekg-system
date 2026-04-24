@@ -1,0 +1,3 @@
+spidev
+matplotlib
+adafruit-blinka
